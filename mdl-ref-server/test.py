@@ -77,6 +77,25 @@ class certTest(unittest.TestCase):
         # TODO: check ProofOfBinding at OID
         # TODO: check signature
 
+import subprocess
+def cbor_print(bts, label):
+    process = subprocess.Popen([
+        'prettycbor', '-e', '-i4', ''.join('{:02x}'.format(x) for x in bts
+    )], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    if len(stderr) != 0:
+        raise Exception(stdout.decode("utf-8"))
+    print("======================================== " + label + " ========================================")
+    print(stdout.decode("utf-8"))
+
+def cbor_dumps(input):
+    output = cbor.dumps(input)
+    cbor_print(output, "SERIALIZE")
+    return output
+
+def cbor_loads(input):
+    cbor_print(input, "DESERIALIZE")
+    return cbor.loads(input)
 
 class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
 
@@ -88,25 +107,25 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
     def test_happy_path(self):
         path = "/mdlServer"
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "StartProvisioning",
                                   "provisioningCode": "1001",
                                   # TODO: MCD
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"], "ReadyToProvisionMessage")
         session_id = cbor_response["eSessionId"]
         self.assertTrue(len(session_id) > 0)
 
         # TODO: insert AdditionalInformationRequired steps here
 
-        response = self.fetch(method="POST", path=path, body=cbor.dumps({
+        response = self.fetch(method="POST", path=path, body=cbor_dumps({
             "messageType": "com.android.identity_credential.StartProvisioning",
             "eSessionId": session_id,
         }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.ProvisioningResponse")
         self.assertEqual(session_id, cbor_response["eSessionId"])
@@ -121,13 +140,13 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
         #
         cert_chain = util.generate_x509_cert_for_credential_key(credential_key)
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.SetCertificateChain",
                                   "eSessionId": session_id,
                                   "credentialKeyCertificateChain": cert_chain,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.DataToProvisionMessage")
         self.assertEqual(session_id, cbor_response["eSessionId"])
@@ -138,7 +157,7 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
 
         # Build ProofOfProvisioning
         #
-        proof_of_provisioning = cbor.dumps(["ProofOfProvisioning",
+        proof_of_provisioning = cbor_dumps(["ProofOfProvisioning",
                                             doc_type,
                                             access_control_profiles,
                                             name_spaces,
@@ -146,13 +165,13 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
         pop_sha256 = hashlib.sha256(proof_of_provisioning).digest()
         pop_signature = util.cose_sign1_sign(credential_key, proof_of_provisioning)
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.SetProofOfProvisioning",
                                   "eSessionId": session_id,
                                   "proofOfProvisioningSignature": pop_signature,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"], "EndSessionMessage")
         self.assertEqual(session_id, cbor_response["eSessionId"])
         self.assertEqual("Success", cbor_response["reason"])
@@ -162,12 +181,12 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
         # Now get some auth keys. This is a new flow.
         #
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.CertifyAuthKeys",
                                   "credentialKey": util.to_cose_key(credential_key.public_key()),
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.CertifyAuthKeysProveOwnership")
         session_id = cbor_response["eSessionId"]
@@ -177,19 +196,19 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
 
         # Identify ourselves
         #
-        proof_of_ownership = cbor.dumps(["ProofOfOwnership",
+        proof_of_ownership = cbor_dumps(["ProofOfOwnership",
                                          doc_type,
                                          challenge,
                                          False])
         poo_signature = util.cose_sign1_sign(credential_key, proof_of_ownership)
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.CertifyAuthKeysProveOwnershipResponse",
                                   "eSessionId": session_id,
                                   "proofOfOwnershipSignature": poo_signature,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.CertifyAuthKeysReady")
         self.assertEqual(session_id, cbor_response["eSessionId"])
@@ -204,13 +223,13 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
             auth_key_certs.append(cert)
 
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.CertifyAuthKeysSendCerts",
                                   "eSessionId": session_id,
                                   "authKeyCerts": auth_key_certs,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.CertifyAuthKeysResponse")
         self.assertEqual(session_id, cbor_response["eSessionId"])
@@ -218,12 +237,12 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
         # TODO: inspect |staticAuthDatas|
 
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "RequestEndSession",
                                   "eSessionId": session_id,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"], "EndSessionMessage")
         self.assertEqual(session_id, cbor_response["eSessionId"])
         self.assertEqual("Success", cbor_response["reason"])
@@ -233,12 +252,12 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
         # Check update. This is a new flow.
         #
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.UpdateCredential",
                                   "credentialKey": util.to_cose_key(credential_key.public_key()),
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.UpdateCredentialProveOwnership")
         session_id = cbor_response["eSessionId"]
@@ -248,19 +267,19 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
 
         # Identify ourselves expected no updates
         #
-        proof_of_ownership = cbor.dumps(["ProofOfOwnership",
+        proof_of_ownership = cbor_dumps(["ProofOfOwnership",
                                          doc_type,
                                          challenge,
                                          False])
         poo_signature = util.cose_sign1_sign(credential_key, proof_of_ownership)
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.UpdateCredentialProveOwnershipResponse",
                                   "eSessionId": session_id,
                                   "proofOfOwnershipSignature": poo_signature,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.UpdateCredentialResponse")
         self.assertEqual(session_id, cbor_response["eSessionId"])
@@ -275,12 +294,12 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
         # Check update. This is a new flow.
         #
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.UpdateCredential",
                                   "credentialKey": util.to_cose_key(credential_key.public_key()),
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.UpdateCredentialProveOwnership")
         session_id = cbor_response["eSessionId"]
@@ -290,19 +309,19 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
 
         # Identify ourselves expected update
         #
-        proof_of_ownership = cbor.dumps(["ProofOfOwnership",
+        proof_of_ownership = cbor_dumps(["ProofOfOwnership",
                                          doc_type,
                                          challenge,
                                          False])
         poo_signature = util.cose_sign1_sign(credential_key, proof_of_ownership)
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.UpdateCredentialProveOwnershipResponse",
                                   "eSessionId": session_id,
                                   "proofOfOwnershipSignature": poo_signature,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.UpdateCredentialResponse")
         self.assertEqual(session_id, cbor_response["eSessionId"])
@@ -311,12 +330,12 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
         # Get data to update (new provisioning)
         #
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.UpdateCredentialGetDataToUpdate",
                                   "eSessionId": session_id,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.UpdateCredentialDataToProvisionMessage")
         self.assertEqual(session_id, cbor_response["eSessionId"])
@@ -327,7 +346,7 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
 
         # Build ProofOfProvisioning for updated data
         #
-        proof_of_provisioning = cbor.dumps(["ProofOfProvisioning",
+        proof_of_provisioning = cbor_dumps(["ProofOfProvisioning",
                                             doc_type,
                                             access_control_profiles,
                                             name_spaces,
@@ -335,13 +354,13 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
         pop_sha256 = hashlib.sha256(proof_of_provisioning).digest()
         pop_signature = util.cose_sign1_sign(credential_key, proof_of_provisioning)
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.UpdateCredentialSetProofOfProvisioning",
                                   "eSessionId": session_id,
                                   "proofOfProvisioningSignature": pop_signature,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"], "EndSessionMessage")
         self.assertEqual(session_id, cbor_response["eSessionId"])
         self.assertEqual("Success", cbor_response["reason"])
@@ -351,12 +370,12 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
         # Delete credential. This is a new flow.
         #
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.DeleteCredential",
                                   "credentialKey": util.to_cose_key(credential_key.public_key()),
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.DeleteCredentialProveOwnership")
         session_id = cbor_response["eSessionId"]
@@ -366,19 +385,19 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
 
         # Identify ourselves expected update
         #
-        proof_of_ownership = cbor.dumps(["ProofOfOwnership",
+        proof_of_ownership = cbor_dumps(["ProofOfOwnership",
                                          doc_type,
                                          challenge,
                                          False])
         poo_signature = util.cose_sign1_sign(credential_key, proof_of_ownership)
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.DeleteCredentialProveOwnershipResponse",
                                   "eSessionId": session_id,
                                   "proofOfOwnershipSignature": poo_signature,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"],
                          "com.android.identity_credential.DeleteCredentialReadyForDeletion")
         self.assertEqual(session_id, cbor_response["eSessionId"])
@@ -387,19 +406,19 @@ class mdlServerTest(tornado.testing.AsyncHTTPTestCase):
 
         # Get data to update (new provisioning)
         #
-        proof_of_deletion = cbor.dumps(["ProofOfDeletion",
+        proof_of_deletion = cbor_dumps(["ProofOfDeletion",
                                         doc_type,
                                         challenge,
                                         False])
         pod_signature = util.cose_sign1_sign(credential_key, proof_of_deletion)
         response = self.fetch(method="POST", path=path,
-                              body=cbor.dumps({
+                              body=cbor_dumps({
                                   "messageType": "com.android.identity_credential.DeleteCredentialDeleted",
                                   "eSessionId": session_id,
                                   "proofOfDeletionSignature": pod_signature,
                               }))
         self.assertEqual(response.code, 200)
-        cbor_response = cbor.loads(response.body)
+        cbor_response = cbor_loads(response.body)
         self.assertEqual(cbor_response["messageType"], "EndSessionMessage")
         self.assertEqual(session_id, cbor_response["eSessionId"])
         self.assertEqual("Success", cbor_response["reason"])
